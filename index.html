@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>body{margin:0}[hidden]{display:none!important}</style>
+<title>Chiffre Brouillé</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one narrow column, like a code sheet — settings on top, the alphabet strip as the centrepiece, message in, coded message out. */
+:root {
+  --bg: #EEF1F6;
+  --surface: #FFFFFF;
+  --line: #D3D9E6;
+  --ink: #16203A;
+  --muted: #5B6783;
+  --accent: #0B7A75;
+  --accent-ink: #FFFFFF;
+  --noise: #B03A72;
+  --error: #B3261E;
+  --display: "Bricolage Grotesque", "Trebuchet MS", system-ui, sans-serif;
+  --body: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #10162A; --surface: #1A2240; --line: #2F3A61; --ink: #E6EAF5; --muted: #98A4C2;
+    --accent: #4FD1C5; --accent-ink: #0B1A22; --noise: #F08AB8; --error: #FF8A80;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #10162A; --surface: #1A2240; --line: #2F3A61; --ink: #E6EAF5; --muted: #98A4C2;
+  --accent: #4FD1C5; --accent-ink: #0B1A22; --noise: #F08AB8; --error: #FF8A80;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 16px;
+  line-height: 1.5;
+  padding-inline: 16px;
+  padding-block: 28px 48px;
+}
+.page { max-width: 620px; margin-inline: auto; display: flex; flex-direction: column; gap: 22px; }
+
+h1 { font-family: var(--display); font-weight: 700; font-size: 2.1rem; line-height: 1.1; margin: 0; text-wrap: balance; }
+.lede { margin: 6px 0 0; color: var(--muted); max-width: 52ch; }
+
+.label { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; display: block; }
+.field { display: flex; flex-direction: column; min-width: 0; }
+.hint { font-size: 0.88rem; color: var(--muted); margin: 8px 0 0; }
+
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.modes { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface); }
+.modes.three { grid-template-columns: 1fr 1fr 1fr; }
+.modes button { border: 0; background: transparent; padding: 12px 8px; font-weight: 600; color: var(--muted); min-width: 0; }
+.modes button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+
+.digits { display: flex; flex-wrap: wrap; gap: 6px; }
+.digits button {
+  width: 36px; height: 40px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+  font-family: var(--mono); font-weight: 600;
+}
+.digits button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.read-digit { font-family: var(--mono); font-weight: 600; font-size: 1.1rem; color: var(--accent); }
+
+.strip { display: grid; grid-template-columns: repeat(26, 1fr); font-family: var(--mono); font-size: clamp(0.62rem, 2.6vw, 0.95rem); text-align: center; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 8px 4px; row-gap: 4px; }
+.strip span { min-width: 0; }
+.strip .plain { color: var(--muted); }
+.strip .coded { color: var(--accent); font-weight: 600; }
+.strip-legend { display: flex; justify-content: space-between; font-size: 0.82rem; color: var(--muted); margin-top: 6px; gap: 12px; flex-wrap: wrap; }
+
+textarea {
+  width: 100%; min-height: 110px; resize: vertical; padding: 12px 14px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink);
+  font-family: var(--mono); font-size: 1rem; line-height: 1.5;
+}
+
+.out {
+  min-height: 84px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
+  font-family: var(--mono); font-size: 1.1rem; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; user-select: all;
+}
+.out .n { color: var(--accent); font-weight: 600; }
+.out .z { color: var(--noise); }
+.out .err { color: var(--error); font-family: var(--body); font-size: 1rem; user-select: none; }
+.key { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 0.82rem; color: var(--muted); margin-top: 8px; }
+.key i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+.key .kn i { background: var(--accent); } .key .kz i { background: var(--noise); } .key .km i { background: var(--ink); }
+
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 10px 16px; font-weight: 600; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+
+details { border-top: 1px solid var(--line); padding-top: 14px; }
+summary { font-weight: 600; cursor: pointer; }
+details ol { margin: 10px 0 0; padding-left: 1.3em; color: var(--muted); max-width: 60ch; }
+details li + li { margin-top: 4px; }
+code { font-family: var(--mono); color: var(--ink); }
+</style>
+
+</head>
+<body>
+<main class="page">
+  <header>
+    <h1>Chiffre Brouillé</h1>
+    <p class="lede">Un nombre, quelques lettres qui ne veulent rien dire, puis ton message décalé dans l'alphabet.</p>
+  </header>
+
+  <div class="modes" role="group" aria-label="Mode">
+    <button type="button" id="mode-enc" aria-pressed="true">Chiffrer</button>
+    <button type="button" id="mode-dec" aria-pressed="false">Déchiffrer</button>
+  </div>
+
+  <div class="field" id="level-field">
+    <span class="label" id="level-label">Difficulté</span>
+    <div class="modes three" role="group" aria-labelledby="level-label">
+      <button type="button" id="level-1" aria-pressed="true">Facile</button>
+      <button type="button" id="level-2" aria-pressed="false">Moyen</button>
+      <button type="button" id="level-3" aria-pressed="false">Difficile</button>
+    </div>
+    <p class="hint" id="level-hint"></p>
+  </div>
+
+  <div class="field" id="digit-field">
+    <span class="label" id="digit-label">Nombre de départ</span>
+    <div class="digits" id="digits" role="group" aria-labelledby="digit-label"></div>
+    <div class="read-digit" id="read-digit" hidden></div>
+  </div>
+
+  <div class="field">
+    <span class="label">Alphabet décalé</span>
+    <div class="strip" id="strip" aria-hidden="true"></div>
+    <div class="strip-legend"><span>Ligne du haut : lettre normale</span><span>Ligne du bas : lettre codée</span></div>
+    <p class="hint" id="strip-note" hidden>Ce décalage est celui du premier nombre. Chaque nouveau nombre dans le message le change.</p>
+  </div>
+
+  <div class="field" id="enc-field">
+    <label class="label" for="plain-input">Ton message</label>
+    <textarea id="plain-input" spellcheck="false" autocomplete="off">On se voit demain devant le lycée</textarea>
+  </div>
+
+  <div class="field" id="dec-field" hidden>
+    <label class="label" for="coded-input">Message reçu</label>
+    <textarea id="coded-input" spellcheck="false" autocomplete="off" autocapitalize="characters">2LRUCN4ABCDYX</textarea>
+  </div>
+
+  <div class="field">
+    <span class="label" id="out-label">Message chiffré</span>
+    <div class="out" id="out" aria-live="polite" aria-labelledby="out-label"></div>
+    <div class="key" id="key">
+      <span class="kn"><i></i>nombres</span><span class="kz"><i></i>lettres sans signification</span><span class="km"><i></i>message</span>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn primary" id="copy">Copier</button>
+      <button type="button" class="btn" id="reroll">Mélanger à nouveau</button>
+    </div>
+  </div>
+
+  <details>
+    <summary>Comment ça marche</summary>
+    <ol>
+      <li>Le message commence par un nombre de 1 à 9.</li>
+      <li>Les lettres qui suivent, autant que le nombre, ne veulent rien dire. On les jette.</li>
+      <li>Ensuite vient le vrai message : chaque lettre est avancée d'autant de places que le nombre. Après Z, on repart à A.</li>
+      <li>Si un autre nombre apparaît plus loin, on recommence : on jette autant de lettres, puis le décalage devient ce nouveau nombre.</li>
+      <li>Les chiffres de ton message sont écrits en lettres (8 devient HUIT), pour ne pas les confondre avec les nombres du code.</li>
+      <li>Exemple : <code>2LRUCN4ABCDYX</code> donne <code>SALUT</code>.</li>
+    </ol>
+  </details>
+</main>
+
+<script>
+// --- cipher core ---
+var A = 65;
+var WORDS = ['ZERO', 'UN', 'DEUX', 'TROIS', 'QUATRE', 'CINQ', 'SIX', 'SEPT', 'HUIT', 'NEUF'];
+
+function clean(text, spell) {
+  var t = text.replace(/œ/gi, 'oe').replace(/æ/gi, 'ae')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
+  return spell ? t.replace(/[0-9]/g, function (d) { return WORDS[d]; }) : t;
+}
+function shiftChar(c, k) {
+  return String.fromCharCode((c.charCodeAt(0) - A + k + 26) % 26 + A);
+}
+function rng(seed) {
+  return function () {
+    seed = seed + 0x6D2B79F5 | 0;
+    var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// level 1: one number at the start; 2: a new number every two words; 3: new numbers inside words.
+// Returns parts [{t: 'n' | 'z' | 'm', s}] : number, noise, message.
+function encode(text, level, n, seed) {
+  var rnd = rng(seed), parts = [], buf = '';
+  var k, letters, words, target, wordStart = true;
+  function block(d) {
+    if (buf) { parts.push({ t: 'm', s: buf }); buf = ''; }
+    var noise = '';
+    for (var i = 0; i < d; i++) noise += String.fromCharCode(A + Math.floor(rnd() * 26));
+    parts.push({ t: 'n', s: String(d) }, { t: 'z', s: noise });
+    k = d; letters = 0; words = 0; target = 4 + Math.floor(rnd() * 4);
+  }
+  block(n);
+  var src = clean(text, true);
+  for (var i = 0; i < src.length; i++) {
+    var c = src[i];
+    if (c >= 'A' && c <= 'Z') {
+      if (level === 3 && letters >= target) block(1 + Math.floor(rnd() * 6));
+      if (level === 2 && wordStart && words >= 2) block(1 + Math.floor(rnd() * 6));
+      if (wordStart) { words++; wordStart = false; }
+      buf += shiftChar(c, k);
+      letters++;
+    } else {
+      buf += c;
+      if (/\s/.test(c)) wordStart = true;
+    }
+  }
+  if (buf) parts.push({ t: 'm', s: buf });
+  return parts;
+}
+function join(parts) {
+  return parts.map(function (p) { return p.s; }).join('');
+}
+function decode(coded) {
+  var raw = clean(coded, false).trim();
+  if (!raw) return { error: 'empty' };
+  if (!/^[1-9]/.test(raw)) return { error: 'start' };
+  var first = Number(raw[0]), k = 0, blocks = 0, text = '';
+  for (var i = 0; i < raw.length; i++) {
+    var c = raw[i];
+    if (c >= '1' && c <= '9') { k = Number(c); i += k; blocks++; }
+    else if (c >= 'A' && c <= 'Z') text += shiftChar(c, -k);
+    else text += c;
+  }
+  if (!text.trim()) return { error: 'short', first: first };
+  return { first: first, blocks: blocks, text: text };
+}
+// --- end core ---
+
+(function () {
+  var mode = 'enc';
+  var level = 1;
+  var n = 3;
+  var seed = Math.floor(Math.random() * 1e9);
+  var plainText = '';
+  var HINTS = {
+    1: 'Un seul nombre, au début du message.',
+    2: 'Un nouveau nombre tous les deux mots. Chaque nombre change le décalage.',
+    3: 'Des nombres en plein milieu des mots. Chaque nombre change le décalage.'
+  };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var out = $('out'), strip = $('strip'), digits = $('digits');
+
+  function span(cls, text) {
+    var s = document.createElement('span');
+    if (cls) s.className = cls;
+    s.textContent = text;
+    return s;
+  }
+
+  function drawStrip(k) {
+    strip.textContent = '';
+    var i;
+    for (i = 0; i < 26; i++) strip.appendChild(span('plain', String.fromCharCode(A + i)));
+    for (i = 0; i < 26; i++) strip.appendChild(span('coded', k ? String.fromCharCode(A + (i + k) % 26) : '·'));
+  }
+
+  function render() {
+    out.textContent = '';
+    plainText = '';
+    if (mode === 'enc') {
+      drawStrip(n);
+      $('strip-note').hidden = level === 1;
+      if (!$('plain-input').value.trim()) { out.appendChild(span('err', 'Écris un message ci-dessus.')); return; }
+      var parts = encode($('plain-input').value, level, n, seed);
+      parts.forEach(function (p) { out.appendChild(span(p.t === 'm' ? '' : p.t, p.s)); });
+      plainText = join(parts);
+    } else {
+      var r = decode($('coded-input').value);
+      $('read-digit').textContent = r.first ? String(r.first) : '—';
+      drawStrip(r.first || 0);
+      $('strip-note').hidden = !(r.blocks > 1);
+      if (r.error === 'empty') { out.appendChild(span('err', 'Colle le message reçu ci-dessus.')); return; }
+      if (r.error === 'start') { out.appendChild(span('err', 'Le message doit commencer par un nombre de 1 à 9.')); return; }
+      if (r.error === 'short') { out.appendChild(span('err', 'Le message est trop court : il ne reste rien après les lettres de bruit.')); return; }
+      plainText = r.text;
+      out.appendChild(span('', plainText));
+    }
+  }
+
+  function setLevel(l) {
+    level = l;
+    [1, 2, 3].forEach(function (i) { $('level-' + i).setAttribute('aria-pressed', String(i === l)); });
+    $('level-hint').textContent = HINTS[l];
+    render();
+  }
+
+  function setMode(m) {
+    mode = m;
+    var enc = m === 'enc';
+    $('mode-enc').setAttribute('aria-pressed', String(enc));
+    $('mode-dec').setAttribute('aria-pressed', String(!enc));
+    $('enc-field').hidden = !enc;
+    $('dec-field').hidden = enc;
+    $('level-field').hidden = !enc;
+    digits.hidden = !enc;
+    $('read-digit').hidden = enc;
+    $('digit-label').textContent = enc ? 'Nombre de départ' : 'Premier nombre lu dans le message';
+    $('out-label').textContent = enc ? 'Message chiffré' : 'Message déchiffré';
+    $('key').hidden = !enc;
+    $('reroll').hidden = !enc;
+    render();
+  }
+
+  for (var d = 1; d <= 9; d++) {
+    (function (d) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = d;
+      b.setAttribute('aria-pressed', String(d === n));
+      b.addEventListener('click', function () {
+        n = d;
+        Array.prototype.forEach.call(digits.children, function (c, i) {
+          c.setAttribute('aria-pressed', String(i + 1 === n));
+        });
+        render();
+      });
+      digits.appendChild(b);
+    })(d);
+  }
+
+  $('mode-enc').addEventListener('click', function () { setMode('enc'); });
+  $('mode-dec').addEventListener('click', function () { setMode('dec'); });
+  [1, 2, 3].forEach(function (i) {
+    $('level-' + i).addEventListener('click', function () { setLevel(i); });
+  });
+  $('plain-input').addEventListener('input', render);
+  $('coded-input').addEventListener('input', render);
+  $('reroll').addEventListener('click', function () { seed = Math.floor(Math.random() * 1e9); render(); });
+
+  $('copy').addEventListener('click', function () {
+    var btn = this;
+    if (!plainText) return;
+    function done(label) {
+      btn.textContent = label;
+      setTimeout(function () { btn.textContent = 'Copier'; }, 1600);
+    }
+    function selectOut() {
+      var r = document.createRange();
+      r.selectNodeContents(out);
+      var s = window.getSelection();
+      s.removeAllRanges();
+      s.addRange(r);
+      done('Sélectionné, copie-le');
+    }
+    try {
+      navigator.clipboard.writeText(plainText).then(function () { done('Copié'); }, selectOut);
+    } catch (e) { selectOut(); }
+  });
+
+  $('level-hint').textContent = HINTS[level];
+  setMode('enc');
+})();
+</script>
+</body>
+</html>
