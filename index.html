@@ -58,7 +58,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
 button:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .modes { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface); }
-.modes.three { grid-template-columns: 1fr 1fr 1fr; }
+.modes.four { grid-template-columns: repeat(4, 1fr); }
+.modes.four button { padding-inline: 2px; font-size: 0.95rem; }
+input[type="text"] {
+  width: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); color: var(--ink); font-family: var(--mono); font-size: 1rem;
+}
+input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .modes button { border: 0; background: transparent; padding: 12px 8px; font-weight: 600; color: var(--muted); min-width: 0; }
 .modes button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
 
@@ -119,12 +125,19 @@ code { font-family: var(--mono); color: var(--ink); }
 
   <div class="field" id="level-field">
     <span class="label" id="level-label">Difficulté</span>
-    <div class="modes three" role="group" aria-labelledby="level-label">
+    <div class="modes four" role="group" aria-labelledby="level-label">
       <button type="button" id="level-1" aria-pressed="true">Facile</button>
       <button type="button" id="level-2" aria-pressed="false">Moyen</button>
       <button type="button" id="level-3" aria-pressed="false">Difficile</button>
+      <button type="button" id="level-4" aria-pressed="false">Secret</button>
     </div>
     <p class="hint" id="level-hint"></p>
+  </div>
+
+  <div class="field" id="secret-field" hidden>
+    <label class="label" for="secret-input">Mot secret</label>
+    <input type="text" id="secret-input" autocomplete="off" autocapitalize="none" spellcheck="false">
+    <p class="hint">La personne qui reçoit le message doit connaître ce mot, écrit exactement pareil. Sans lui, le message est illisible.</p>
   </div>
 
   <div class="field" id="digit-field">
@@ -133,7 +146,7 @@ code { font-family: var(--mono); color: var(--ink); }
     <div class="read-digit" id="read-digit" hidden></div>
   </div>
 
-  <div class="field">
+  <div class="field" id="strip-field">
     <span class="label">Alphabet décalé</span>
     <div class="strip" id="strip" aria-hidden="true"></div>
     <div class="strip-legend"><span>Ligne du haut : lettre normale</span><span>Ligne du bas : lettre codée</span></div>
@@ -171,6 +184,7 @@ code { font-family: var(--mono); color: var(--ink); }
       <li>Si un autre nombre apparaît plus loin, on recommence : on jette autant de lettres, puis le décalage devient ce nouveau nombre.</li>
       <li>Les chiffres de ton message sont écrits en lettres (8 devient HUIT), pour ne pas les confondre avec les nombres du code.</li>
       <li>Exemple : <code>2LRUCN4ABCDYX</code> donne <code>SALUT</code>.</li>
+      <li>Niveau Secret : le message est verrouillé avec un mot secret, puis écrit avec un mélange de lettres latines, de lettres arabes, de chiffres et de signes. Il commence toujours par <code>#</code>. Sans le mot secret, on ne peut pas le lire.</li>
     </ol>
   </details>
 </main>
@@ -244,6 +258,65 @@ function decode(coded) {
   if (!text.trim()) return { error: 'short', first: first };
   return { first: first, blocks: blocks, text: text };
 }
+
+// Secret level: AES-GCM with a key derived from the secret word, written in a 64-symbol mixed alphabet.
+var SYMBOLS = Array.from('ABCDEFGHKLMNPQRSTWXZ' + 'بتثجحخدذرزسشصضطظعغفق' + '0123456789' + '@$%&+=?!§€£¥÷×');
+var subtle = typeof crypto !== 'undefined' && crypto.subtle;
+var keyCache = {};
+
+function toSymbols(bytes) {
+  var s = '', acc = 0, bits = 0;
+  for (var i = 0; i < bytes.length; i++) {
+    acc = (acc << 8) | bytes[i]; bits += 8;
+    while (bits >= 6) { bits -= 6; s += SYMBOLS[(acc >> bits) & 63]; }
+    acc &= (1 << bits) - 1;
+  }
+  if (bits > 0) s += SYMBOLS[(acc << (6 - bits)) & 63];
+  return s;
+}
+function fromSymbols(str) {
+  var bytes = [], acc = 0, bits = 0;
+  Array.from(str).forEach(function (ch) {
+    var v = SYMBOLS.indexOf(ch);
+    if (v < 0) throw new Error('symbol');
+    acc = (acc << 6) | v; bits += 6;
+    if (bits >= 8) { bits -= 8; bytes.push((acc >> bits) & 255); }
+    acc &= (1 << bits) - 1;
+  });
+  return new Uint8Array(bytes);
+}
+function secretKey(pass, salt) {
+  if (!subtle) return Promise.reject(new Error('unsupported'));
+  var id = pass + '|' + Array.prototype.join.call(salt, ',');
+  if (!keyCache[id]) {
+    keyCache[id] = subtle.importKey('raw', new TextEncoder().encode(pass.normalize('NFC')), 'PBKDF2', false, ['deriveKey'])
+      .then(function (k) {
+        return subtle.deriveKey({ name: 'PBKDF2', salt: salt, iterations: 150000, hash: 'SHA-256' }, k,
+          { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+      });
+  }
+  return keyCache[id];
+}
+function encodeSecret(text, pass, salt) {
+  return secretKey(pass, salt).then(function (key) {
+    return subtle.encrypt({ name: 'AES-GCM', iv: salt.slice(0, 12) }, key, new TextEncoder().encode(text));
+  }).then(function (ct) {
+    var all = new Uint8Array(salt.length + ct.byteLength);
+    all.set(salt); all.set(new Uint8Array(ct), salt.length);
+    return '#' + toSymbols(all);
+  });
+}
+function decodeSecret(coded, pass) {
+  var bytes;
+  try {
+    bytes = fromSymbols(coded.replace(/[\s‎‏‪-‮⁦-⁩]/g, '').slice(1));
+  } catch (e) { return Promise.reject(e); }
+  if (bytes.length < 33) return Promise.reject(new Error('short'));
+  var salt = bytes.slice(0, 16);
+  return secretKey(pass, salt).then(function (key) {
+    return subtle.decrypt({ name: 'AES-GCM', iv: salt.slice(0, 12) }, key, bytes.slice(16));
+  }).then(function (pt) { return new TextDecoder().decode(pt); });
+}
 // --- end core ---
 
 (function () {
@@ -255,8 +328,17 @@ function decode(coded) {
   var HINTS = {
     1: 'Un seul nombre, au début du message.',
     2: 'Un nouveau nombre tous les deux mots. Chaque nombre change le décalage.',
-    3: 'Des nombres en plein milieu des mots. Chaque nombre change le décalage.'
+    3: 'Des nombres en plein milieu des mots. Chaque nombre change le décalage.',
+    4: 'Lettres latines, lettres arabes, chiffres et signes mélangés. Illisible sans le mot secret.'
   };
+  var salt = newSalt();
+  var renderId = 0;
+
+  function newSalt() {
+    var s = new Uint8Array(16);
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(s);
+    return s;
+  }
 
   var $ = function (id) { return document.getElementById(id); };
   var out = $('out'), strip = $('strip'), digits = $('digits');
@@ -275,18 +357,54 @@ function decode(coded) {
     for (i = 0; i < 26; i++) strip.appendChild(span('coded', k ? String.fromCharCode(A + (i + k) % 26) : '·'));
   }
 
+  function layout(secret) {
+    $('secret-field').hidden = !secret;
+    $('digit-field').hidden = secret;
+    $('strip-field').hidden = secret;
+    $('key').hidden = mode !== 'enc' || secret;
+  }
+
+  function renderSecret(job, failText) {
+    var id = renderId;
+    if (!$('secret-input').value.trim()) { out.appendChild(span('err', 'Écris le mot secret.')); return; }
+    job($('secret-input').value.trim()).then(function (text) {
+      if (id !== renderId) return;
+      out.textContent = '';
+      out.appendChild(span('', text));
+      plainText = text;
+    }, function (e) {
+      if (id !== renderId) return;
+      out.textContent = '';
+      out.appendChild(span('err', e && e.message === 'unsupported' ? 'Le niveau Secret ne marche pas dans ce navigateur.' : failText));
+    });
+  }
+
   function render() {
+    renderId++;
     out.textContent = '';
     plainText = '';
     if (mode === 'enc') {
+      layout(level === 4);
       drawStrip(n);
       $('strip-note').hidden = level === 1;
       if (!$('plain-input').value.trim()) { out.appendChild(span('err', 'Écris un message ci-dessus.')); return; }
+      if (level === 4) {
+        renderSecret(function (pass) { return encodeSecret($('plain-input').value.trim(), pass, salt); },
+          'Le chiffrage a échoué.');
+        return;
+      }
       var parts = encode($('plain-input').value, level, n, seed);
       parts.forEach(function (p) { out.appendChild(span(p.t === 'm' ? '' : p.t, p.s)); });
       plainText = join(parts);
     } else {
-      var r = decode($('coded-input').value);
+      var coded = $('coded-input').value.trim();
+      layout(coded[0] === '#');
+      if (coded[0] === '#') {
+        renderSecret(function (pass) { return decodeSecret(coded, pass); },
+          'Mot secret incorrect, ou message abîmé.');
+        return;
+      }
+      var r = decode(coded);
       $('read-digit').textContent = r.first ? String(r.first) : '—';
       drawStrip(r.first || 0);
       $('strip-note').hidden = !(r.blocks > 1);
@@ -300,7 +418,7 @@ function decode(coded) {
 
   function setLevel(l) {
     level = l;
-    [1, 2, 3].forEach(function (i) { $('level-' + i).setAttribute('aria-pressed', String(i === l)); });
+    [1, 2, 3, 4].forEach(function (i) { $('level-' + i).setAttribute('aria-pressed', String(i === l)); });
     $('level-hint').textContent = HINTS[l];
     render();
   }
@@ -317,7 +435,6 @@ function decode(coded) {
     $('read-digit').hidden = enc;
     $('digit-label').textContent = enc ? 'Nombre de départ' : 'Premier nombre lu dans le message';
     $('out-label').textContent = enc ? 'Message chiffré' : 'Message déchiffré';
-    $('key').hidden = !enc;
     $('reroll').hidden = !enc;
     render();
   }
@@ -341,12 +458,13 @@ function decode(coded) {
 
   $('mode-enc').addEventListener('click', function () { setMode('enc'); });
   $('mode-dec').addEventListener('click', function () { setMode('dec'); });
-  [1, 2, 3].forEach(function (i) {
+  [1, 2, 3, 4].forEach(function (i) {
     $('level-' + i).addEventListener('click', function () { setLevel(i); });
   });
+  $('secret-input').addEventListener('input', render);
   $('plain-input').addEventListener('input', render);
   $('coded-input').addEventListener('input', render);
-  $('reroll').addEventListener('click', function () { seed = Math.floor(Math.random() * 1e9); render(); });
+  $('reroll').addEventListener('click', function () { seed = Math.floor(Math.random() * 1e9); salt = newSalt(); render(); });
 
   $('copy').addEventListener('click', function () {
     var btn = this;
